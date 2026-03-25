@@ -79,12 +79,6 @@
                     body: JSON.stringify({ content, role, method })
                 }),
             
-            // 自动打标
-            autoLabel: () => API.fetch('/api/label', { method: 'POST' }),
-            
-            // 可行性评估
-            evaluate: (ideaId) => API.fetch(`/api/ideas/${ideaId}/evaluate`, { method: 'POST' }),
-            
             // 获取统计
             getStats: () => API.fetch('/api/stats'),
             
@@ -342,23 +336,14 @@
         );
 
         // 对话流组件
-        const ThreadView = ({ idea, onClose, onAddComment, onEvaluate }) => {
+        const ThreadView = ({ idea, onClose, onAddComment }) => {
             const [newComment, setNewComment] = useState('');
-            const [isEvaluating, setIsEvaluating] = useState(false);
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 if (newComment.trim() && onAddComment) {
                     await onAddComment(idea.id, newComment);
                     setNewComment('');
-                }
-            };
-
-            const handleEvaluate = async () => {
-                if (onEvaluate && !isEvaluating) {
-                    setIsEvaluating(true);
-                    await onEvaluate(idea.id);
-                    setIsEvaluating(false);
                 }
             };
 
@@ -382,15 +367,6 @@
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    {onEvaluate && (
-                                        <button 
-                                            onClick={handleEvaluate}
-                                            disabled={isEvaluating}
-                                            className="px-3 py-1 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 text-white rounded-lg text-sm transition-colors flex items-center gap-1"
-                                        >
-                                            {isEvaluating ? '评估中...' : '🤖 Agent评估'}
-                                        </button>
-                                    )}
                                     <button 
                                         onClick={onClose}
                                         className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-2 transition-colors"
@@ -704,29 +680,6 @@
                 }
             };
 
-            // 自动打标
-            const handleAutoLabel = async () => {
-                try {
-                    const result = await API.autoLabel();
-                    alert(result.message);
-                    loadData();
-                } catch (err) {
-                    alert('自动打标失败: ' + err.message);
-                }
-            };
-
-            // 评估想法
-            const handleEvaluate = async (ideaId) => {
-                try {
-                    await API.evaluate(ideaId);
-                    const updated = await API.getIdea(ideaId);
-                    setSelectedIdea(updated);
-                    loadData();
-                } catch (err) {
-                    alert('评估失败: ' + err.message);
-                }
-            };
-
             // 过滤后的想法（如果使用API，数据已经过滤过了）
             const filteredIdeas = useMemo(() => {
                 if (useMockData) {
@@ -760,15 +713,6 @@
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                    {!useMockData && (
-                                        <button 
-                                            onClick={handleAutoLabel}
-                                            className="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors flex items-center gap-2"
-                                        >
-                                            <span>🏷️</span>
-                                            Agent自动打标
-                                        </button>
-                                    )}
                                     <button 
                                         onClick={() => setShowAddModal(true)}
                                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
@@ -897,7 +841,6 @@
                             idea={selectedIdea} 
                             onClose={() => setSelectedIdea(null)}
                             onAddComment={handleAddComment}
-                            onEvaluate={!useMockData ? handleEvaluate : null}
                         />
                     )}
 

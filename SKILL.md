@@ -9,6 +9,64 @@
 - **method: proxy** - 人类口述或授权，由 AI 整理代录
 - **method: autonomous** - AI 基于逻辑触发的自主评估
 
+## 双入口架构
+
+Ideaflow 提供**两个独立入口**，共享同一个数据文件（`ideaflow.ndjson`），互不冲突：
+
+```
+┌─────────────┐     ┌─────────────┐
+│   CLI工具   │     │  Flask Web  │
+│  iflow.py   │     │   app.py    │
+└──────┬──────┘     └──────┬──────┘
+       │                   │
+       └─────────┬─────────┘
+                 │
+        ┌────────▼────────┐
+        │  ideaflow.ndjson │
+        └─────────────────┘
+```
+
+### CLI 工具（Agent 主要操作方式）
+**iflow.py** - 命令行工具，面向 Agent 和高级用户
+
+```bash
+# Agent 自动打标
+iflow label <id> <tag1> <tag2>
+
+# Agent 添加评估评论
+iflow comment <id> "评估内容"
+
+# 修改状态
+iflow update <id> --status active
+
+# 查看列表
+iflow list
+```
+
+**使用场景**：
+- Agent 执行自动化任务（Labeler、Evaluator）
+- 批量操作、脚本集成
+- 不依赖浏览器，快速操作
+
+### WebUI（用户浏览界面）
+**app.py** - Flask 应用，面向人类用户的可视化界面
+
+```bash
+# 启动服务
+python app.py
+
+# 访问地址
+http://localhost:8765
+```
+
+**使用场景**：
+- 浏览所有想法、查看详情
+- 可视化压强热力图
+- 手动添加新想法
+- 添加评论参与讨论
+
+**注意**：WebUI **不暴露 Agent 自动操作按钮**（如自动打标、自动评估），这些必须通过 CLI 执行。
+
 ## 核心约束
 
 ### 1. 权限边界
@@ -26,7 +84,8 @@ unclassified → active → transformed/archived
 #### Skill: Labeler（自动打标）
 - 触发：`status == "unclassified"`
 - 动作：分析内容，添加领域标签
-- 命令：`iflow label <id> <tags...>`
+- **命令**：`iflow label <id> <tags...>`
+- 注意：不要在 WebUI 操作，使用 CLI
 
 #### Skill: Evaluator（可行性评估）
 - 触发：`meta.updated_flag == true`
@@ -34,16 +93,17 @@ unclassified → active → transformed/archived
   - 实现难度评估
   - 风险点识别
   - 任务拆解建议
-- 命令：自动执行，无需手动调用
+- **命令**：`iflow comment <id> "【可行性评估】..."`
+- 注意：不要在 WebUI 点击评估按钮，通过 CLI 添加评论
 
 #### Skill: Proxy Recorder（代录员）
 - 触发：人类说"记一下这个想法"
 - 动作：以 `method: proxy` 方式创建新条目
-- 命令：`iflow add --proxy "想法内容"`
+- **命令**：`iflow add --proxy "想法内容"`
 
 ## 数据操作规范
 
-### 读取数据
+### CLI 读取数据
 ```bash
 # 列出所有想法
 iflow list
@@ -61,7 +121,7 @@ iflow list --filter updated:true
 iflow get <id>
 ```
 
-### 修改数据
+### CLI 修改数据
 ```bash
 # 更新状态
 iflow update <id> --status active
@@ -96,28 +156,45 @@ iflow ack <id>
 3. [步骤3]
 ```
 
-## 重要提醒
-- 所有修改操作都会自动设置 `meta.updated_flag = true`
-- Agent 不得随意删除任何数据
-- 优先使用 CLI 命令操作，避免直接读写 ndjson 文件
-- 保持数据文件扁平结构，禁止创建子目录
+## Agent 守护职责
 
-## WebUI 使用须知
-
-### 启动服务器
-WebUI 需要服务器支持，**禁止直接双击打开 index.html**（会导致 CORS 错误）。
+### 启动 Flask 服务
+当用户需要访问 WebUI 时，Agent 必须确保服务运行：
 
 ```bash
-# 启动服务器（默认端口 8765）
-python iflow_server.py
+# 检查服务是否运行
+curl http://localhost:8765/api/stats
 
-# 或指定端口
-python iflow_server.py 8765
+# 如未运行，启动服务
+python app.py
+
+# 或使用后台模式（推荐）
+# Windows
+start /b python app.py
+
+# Linux/Mac  
+nohup python app.py > iflow.log 2>&1 &
 ```
 
-### 访问方式
-- **本机访问**: http://localhost:8765
-- **局域网访问**: http://<本机IP>:8765
+### Agent 检查清单
+1. 用户提及 WebUI/浏览器/可视化时，检查 http://localhost:8765 是否可访问
+2. 如不可访问，执行 `python app.py` 启动服务
+3. 告知用户访问地址并确认正常
+4. 如用户无进一步指示，保持服务运行
 
-### Agent 守护模式
-Agent 应该以守护进程形式持续运行服务器
+## 重要提醒
+
+- **所有修改操作**都会自动设置 `meta.updated_flag = true`
+- **Agent 不得**随意删除任何数据
+- **优先使用 CLI** 命令操作，避免直接读写 ndjson 文件
+- **保持数据文件**扁平结构，禁止创建子目录
+- **WebUI 仅用于**用户浏览和交互，Agent 自动化操作走 CLI
+- **CLI 和 WebUI** 共享数据，可同时使用，互不冲突
+
+## 技术栈
+
+- **CLI 工具**: Python argparse (`iflow.py`)
+- **Web 服务**: Flask (`app.py`)
+- **前端**: React 18 + Tailwind CSS (CDN)
+- **数据存储**: NDJSON 文件 (`ideaflow.ndjson`)
+- **默认端口**: 8765
