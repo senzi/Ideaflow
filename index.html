@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ideaflow - 灵感管理后台</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .pulse-ring { animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite; }
+        @keyframes pulse-ring { 0% { transform: scale(0.8); opacity: 0.8; } 100% { transform: scale(2); opacity: 0; } }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback } = React;
+
+        // API 服务
+        const API = {
+            baseUrl: '',
+            
+            async fetch(url, options = {}) {
+                const response = await fetch(this.baseUrl + url, {
+                    ...options,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    }
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({ error: '请求失败' }));
+                    throw new Error(error.error || `HTTP ${response.status}`);
+                }
+                
+                return response.json();
+            },
+            
+            // 获取所有想法
+            getIdeas: (params = {}) => {
+                const query = new URLSearchParams(params).toString();
+                return API.fetch('/api/ideas' + (query ? '?' + query : ''));
+            },
+            
+            // 获取单个想法
+            getIdea: (id) => API.fetch(`/api/ideas/${id}`),
+            
+            // 创建想法
+            createIdea: (data) => API.fetch('/api/ideas', {
+                method: 'POST',
+                body: JSON.stringify(data)
+            }),
+            
+            // 更新想法
+            updateIdea: (id, data) => API.fetch(`/api/ideas/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify(data)
+            }),
+            
+            // 删除想法
+            deleteIdea: (id) => API.fetch(`/api/ideas/${id}`, {
+                method: 'DELETE'
+            }),
+            
+            // 添加评论
+            addComment: (ideaId, content, role = 'human', method = 'manual') => 
+                API.fetch(`/api/ideas/${ideaId}/comments`, {
+                    method: 'POST',
+                    body: JSON.stringify({ content, role, method })
+                }),
+            
+            // 自动打标
+            autoLabel: () => API.fetch('/api/label', { method: 'POST' }),
+            
+            // 可行性评估
+            evaluate: (ideaId) => API.fetch(`/api/ideas/${ideaId}/evaluate`, { method: 'POST' }),
+            
+            // 获取统计
+            getStats: () => API.fetch('/api/stats'),
+            
+            // 获取标签
+            getTags: () => API.fetch('/api/tags')
+        };
+
+        // 备用模拟数据（API不可用时使用）
+        const MOCK_DATA = [
+            {
+                "id": "idea-001",
+                "title": "Ideaflow 系统架构设计",
+                "content": "基于 NDJSON 的灵感管理系统设计，包含状态流转、评论系统和 Agent 技能集成。采用流体力学模型，通过高压强和稳定通量确保创意的持续产出。",
+                "status": "active",
+                "tags": ["架构", "核心", "设计"],
+                "meta": {
+                    "created_at": "2025-03-25T15:00:00Z",
+                    "last_updated": "2025-03-25T15:00:00Z",
+                    "updated_flag": false
+                },
+                "comments": [
+                    {
+                        "comment_id": "cmt-001",
+                        "role": "agent",
+                        "method": "autonomous",
+                        "content": "建议将状态流转设计为：unclassified → active → transformed/archived",
+                        "timestamp": "2025-03-25T15:05:00Z"
+                    }
+                ]
+            },
+            {
+                "id": "idea-20260325072056-c28f1c61",
+                "title": "用户认证功能",
+                "content": "实现用户认证系统，需要调研OAuth2.0和JWT方案。包括用户注册、登录、权限管理和安全验证等功能模块。",
+                "status": "unclassified",
+                "tags": ["后端", "技术", "产品"],
+                "meta": {
+                    "created_at": "2026-03-25T07:20:56.712010+00:00",
+                    "last_updated": "2026-03-25T07:22:39.414968+00:00",
+                    "updated_flag": true
+                },
+                "comments": [
+                    {
+                        "comment_id": "cmt-38acda1e",
+                        "role": "human",
+                        "method": "manual",
+                        "content": "需要调研OAuth2.0和JWT方案",
+                        "timestamp": "2026-03-25T07:22:34.927742+00:00"
+                    },
+                    {
+                        "comment_id": "cmt-a0c088b4",
+                        "role": "agent",
+                        "method": "autonomous",
+                        "content": "【可行性评估】\\n- 难度：高\\n- 原因：涉及后端、技术、产品多个领域\\n\\n【风险识别】\\n- 技术风险：需要技术调研\\n- 资源风险：需要评估投入成本\\n- 时间风险：取决于执行优先级\\n\\n【任务拆解】\\n1. 进一步细化需求和目标\\n2. 制定具体的执行计划\\n3. 分配资源并开始执行\\n4. 定期回顾和调整",
+                        "timestamp": "2026-03-25T07:22:39.414968+00:00"
+                    }
+                ]
+            },
+            {
+                "id": "idea-20260325074609-da6c20ec",
+                "title": "AI代码审查工具",
+                "content": "开发一个基于AI的代码审查工具，能够自动检测潜在bug和性能问题。集成到CI/CD流程中，提高代码质量。",
+                "status": "unclassified",
+                "tags": ["技术"],
+                "meta": {
+                    "created_at": "2026-03-25T07:46:09.123456+00:00",
+                    "last_updated": "2026-03-25T07:46:15.789012+00:00",
+                    "updated_flag": true
+                },
+                "comments": [
+                    {
+                        "comment_id": "cmt-eval-1",
+                        "role": "agent",
+                        "method": "autonomous",
+                        "content": "【可行性评估】\\n- 难度：高\\n- 原因：基于内容标签分析，该想法涉及技术领域\\n\\n【风险识别】\\n- 技术风险：需要技术调研\\n- 资源风险：需要评估投入成本\\n- 时间风险：取决于执行优先级",
+                        "timestamp": "2026-03-25T07:46:15.789012+00:00"
+                    }
+                ]
+            },
+            {
+                "id": "idea-20260325074610-165d2c05",
+                "title": "学习Rust",
+                "content": "学习Rust编程语言，用于编写高性能的系统工具。重点关注内存安全、并发处理和系统级编程。",
+                "status": "active",
+                "tags": ["技术", "高优先级", "学习计划"],
+                "meta": {
+                    "created_at": "2026-03-25T07:46:10.577461+00:00",
+                    "last_updated": "2026-03-25T07:46:34.834845+00:00",
+                    "updated_flag": false
+                },
+                "comments": []
+            },
+            {
+                "id": "idea-20260325074611-36a66afd",
+                "title": "商业模式创新",
+                "content": "设计一个新的商业模式，结合订阅制和一次性购买。研究混合收费模式在不同市场的适用性。",
+                "status": "unclassified",
+                "tags": ["商业", "产品"],
+                "meta": {
+                    "created_at": "2026-03-25T07:46:11.234567+00:00",
+                    "last_updated": "2026-03-25T07:46:20.890123+00:00",
+                    "updated_flag": true
+                },
+                "comments": [
+                    {
+                        "comment_id": "cmt-eval-2",
+                        "role": "agent",
+                        "method": "autonomous",
+                        "content": "【可行性评估】\\n- 难度：中\\n- 原因：基于内容标签分析，该想法涉及商业、产品领域\\n\\n【风险识别】\\n- 技术风险：较低\\n- 资源风险：可控\\n- 时间风险：取决于执行优先级",
+                        "timestamp": "2026-03-25T07:46:20.890123+00:00"
+                    }
+                ]
+            },
+            {
+                "id": "idea-20260325074657-cd98891f",
+                "title": "AI文章",
+                "content": "写一篇关于AI的文章，探讨AI在各个领域的应用和未来发展趋势。",
+                "status": "unclassified",
+                "tags": ["写作"],
+                "meta": {
+                    "created_at": "2026-03-25T07:46:57.336724+00:00",
+                    "last_updated": "2026-03-25T07:46:57.336724+00:00",
+                    "updated_flag": true
+                },
+                "comments": []
+            }
+        ];
+
+        // 工具函数
+        const formatDate = (dateStr) => {
+            const date = new Date(dateStr);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        };
+
+        const getStatusColor = (status) => {
+            const colors = {
+                unclassified: 'bg-gray-100 text-gray-700 border-gray-300',
+                active: 'bg-blue-100 text-blue-700 border-blue-300',
+                archived: 'bg-gray-100 text-gray-500 border-gray-300',
+                transformed: 'bg-green-100 text-green-700 border-green-300'
+            };
+            return colors[status] || colors.unclassified;
+        };
+
+        const getStatusLabel = (status) => {
+            const labels = {
+                unclassified: '未分类',
+                active: '进行中',
+                archived: '已归档',
+                transformed: '已转化'
+            };
+            return labels[status] || status;
+        };
+
+        const getRoleIcon = (role) => {
+            return role === 'human' ? '👤' : '🤖';
+        };
+
+        const getMethodLabel = (method) => {
+            const labels = {
+                manual: '手动',
+                proxy: '代录',
+                autonomous: '自动'
+            };
+            return labels[method] || method;
+        };
+
+        // 计算压强分数
+        const calculatePressure = (idea) => {
+            const commentWeight = idea.comments.length * 10;
+            const updateWeight = idea.meta.updated_flag ? 20 : 0;
+            const timeDiff = Date.now() - new Date(idea.meta.created_at).getTime();
+            const daysSince = timeDiff / (1000 * 60 * 60 * 24);
+            const timeWeight = Math.min(daysSince * 2, 30);
+            return Math.min(commentWeight + updateWeight + timeWeight, 100);
+        };
+
+        // 压强热力图组件
+        const PressureHeatmap = ({ ideas }) => {
+            const pressureData = useMemo(() => {
+                return ideas.map(idea => ({
+                    ...idea,
+                    pressure: calculatePressure(idea)
+                })).sort((a, b) => b.pressure - a.pressure);
+            }, [ideas]);
+
+            const getPressureColor = (pressure) => {
+                if (pressure >= 70) return 'bg-red-500';
+                if (pressure >= 40) return 'bg-yellow-500';
+                return 'bg-green-500';
+            };
+
+            const getPressureLevel = (pressure) => {
+                if (pressure >= 70) return '高压';
+                if (pressure >= 40) return '中压';
+                return '低压';
+            };
+
+            return (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-semibold text-gray-800">认知压强热力图</h2>
+                        <div className="flex gap-2 text-sm">
+                            <span className="flex items-center gap-1">
+                                <span className="w-3 h-3 rounded-full bg-red-500"></span> 高压
+                            </span>
+                            <span className="flex items-center gap-1">
+                                <span className="w-3 h-3 rounded-full bg-yellow-500"></span> 中压
+                            </span>
+                            <span className="flex items-center gap-1">
+                                <span className="w-3 h-3 rounded-full bg-green-500"></span> 低压
+                            </span>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                        {pressureData.map(idea => (
+                            <div 
+                                key={idea.id}
+                                className={`${getPressureColor(idea.pressure)} rounded-lg p-3 text-white cursor-pointer transition-transform hover:scale-105`}
+                                title={`${idea.title} - 压强: ${Math.round(idea.pressure)}`}
+                            >
+                                <div className="text-xs opacity-90 mb-1 truncate">{idea.title}</div>
+                                <div className="text-lg font-bold">{Math.round(idea.pressure)}</div>
+                                <div className="text-xs opacity-75">{getPressureLevel(idea.pressure)}</div>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="mt-4 text-sm text-gray-600">
+                        <p>压强计算公式：评论密度 × 10 + 更新标记 × 20 + 停留时长 × 2</p>
+                    </div>
+                </div>
+            );
+        };
+
+        // 统计卡片组件
+        const StatCard = ({ title, value, subtitle, icon, color }) => (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="flex items-start justify-between">
+                    <div>
+                        <p className="text-sm font-medium text-gray-600 mb-1">{title}</p>
+                        <p className="text-3xl font-bold text-gray-900">{value}</p>
+                        {subtitle && <p className="text-sm text-gray-500 mt-1">{subtitle}</p>}
+                    </div>
+                    <div className={`w-12 h-12 rounded-lg ${color} flex items-center justify-center text-2xl`}>
+                        {icon}
+                    </div>
+                </div>
+            </div>
+        );
+
+        // 对话流组件
+        const ThreadView = ({ idea, onClose, onAddComment, onEvaluate }) => {
+            const [newComment, setNewComment] = useState('');
+            const [isEvaluating, setIsEvaluating] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (newComment.trim() && onAddComment) {
+                    await onAddComment(idea.id, newComment);
+                    setNewComment('');
+                }
+            };
+
+            const handleEvaluate = async () => {
+                if (onEvaluate && !isEvaluating) {
+                    setIsEvaluating(true);
+                    await onEvaluate(idea.id);
+                    setIsEvaluating(false);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col fade-in">
+                        {/* Header */}
+                        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
+                            <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                    <h2 className="text-2xl font-bold mb-2">{idea.title}</h2>
+                                    <div className="flex flex-wrap gap-2 mb-3">
+                                        <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(idea.status)} bg-white bg-opacity-20 border-white border-opacity-30 text-white`}>
+                                            {getStatusLabel(idea.status)}
+                                        </span>
+                                        {idea.tags.map(tag => (
+                                            <span key={tag} className="px-2 py-1 bg-white bg-opacity-20 rounded text-sm">
+                                                #{tag}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {onEvaluate && (
+                                        <button 
+                                            onClick={handleEvaluate}
+                                            disabled={isEvaluating}
+                                            className="px-3 py-1 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 text-white rounded-lg text-sm transition-colors flex items-center gap-1"
+                                        >
+                                            {isEvaluating ? '评估中...' : '🤖 Agent评估'}
+                                        </button>
+                                    )}
+                                    <button 
+                                        onClick={onClose}
+                                        className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-2 transition-colors"
+                                    >
+                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex gap-4 text-sm text-blue-100 mt-2">
+                                <span>ID: {idea.id.slice(0, 20)}...</span>
+                                <span>创建于: {formatDate(idea.meta.created_at)}</span>
+                            </div>
+                        </div>
+
+                        {/* Content */}
+                        <div className="p-6 bg-gray-50 border-b">
+                            <h3 className="text-sm font-semibold text-gray-700 mb-2">内容</h3>
+                            <p className="text-gray-800 whitespace-pre-wrap">{idea.content}</p>
+                        </div>
+
+                        {/* Comments Thread */}
+                        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                            <h3 className="text-sm font-semibold text-gray-700 mb-4">
+                                对话流 ({idea.comments.length} 条评论)
+                            </h3>
+                            {idea.comments.length === 0 ? (
+                                <div className="text-center text-gray-500 py-8">
+                                    <div className="text-4xl mb-2">💬</div>
+                                    <p>暂无评论，开始对话吧</p>
+                                </div>
+                            ) : (
+                                idea.comments.map((comment, index) => (
+                                    <div 
+                                        key={comment.comment_id}
+                                        className={`flex gap-4 ${comment.role === 'human' ? 'flex-row' : 'flex-row-reverse'}`}
+                                    >
+                                        <div className="flex-shrink-0">
+                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${
+                                                comment.role === 'human' ? 'bg-blue-100' : 'bg-purple-100'
+                                            }`}>
+                                                {getRoleIcon(comment.role)}
+                                            </div>
+                                        </div>
+                                        <div className={`flex-1 max-w-[80%] ${
+                                            comment.role === 'human' ? '' : 'text-right'
+                                        }`}>
+                                            <div className={`inline-block rounded-2xl px-4 py-3 ${
+                                                comment.role === 'human' 
+                                                    ? 'bg-blue-500 text-white rounded-tl-none' 
+                                                    : 'bg-purple-100 text-purple-900 rounded-tr-none'
+                                            }`}>
+                                                <div className="text-xs opacity-75 mb-1">
+                                                    {comment.role === 'human' ? '人类' : 'Agent'} 
+                                                    · {getMethodLabel(comment.method)}
+                                                </div>
+                                                <div className="whitespace-pre-wrap text-sm">{comment.content}</div>
+                                            </div>
+                                            <div className="text-xs text-gray-400 mt-1">
+                                                {formatDate(comment.timestamp)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        {/* Input */}
+                        <div className="border-t p-4 bg-white">
+                            <form onSubmit={handleSubmit} className="flex gap-3">
+                                <input
+                                    type="text"
+                                    value={newComment}
+                                    onChange={(e) => setNewComment(e.target.value)}
+                                    placeholder="添加评论..."
+                                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                                <button 
+                                    type="submit"
+                                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                >
+                                    发送
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 添加想法弹窗组件
+        const AddModal = ({ onClose, onCreate }) => {
+            const [formData, setFormData] = useState({
+                title: '',
+                content: '',
+                tags: '',
+                status: 'unclassified'
+            });
+            const [submitting, setSubmitting] = useState(false);
+
+            const handleSubmit = async () => {
+                if (!formData.content.trim()) {
+                    alert('请输入想法内容');
+                    return;
+                }
+                setSubmitting(true);
+                const tags = formData.tags.split(',').map(t => t.trim()).filter(t => t);
+                await onCreate({
+                    title: formData.title || undefined,
+                    content: formData.content,
+                    tags: tags,
+                    status: formData.status
+                });
+                setSubmitting(false);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg fade-in">
+                        <div className="p-6 border-b">
+                            <h2 className="text-xl font-bold text-gray-900">新建想法</h2>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">标题（可选）</label>
+                                <input type="text" value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} className="w-full px-3 py-2 border rounded-lg" placeholder="输入想法标题..." />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">内容 *</label>
+                                <textarea value={formData.content} onChange={(e) => setFormData({...formData, content: e.target.value})} className="w-full px-3 py-2 border rounded-lg h-32" placeholder="详细描述你的想法..." />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">标签（用逗号分隔）</label>
+                                <input type="text" value={formData.tags} onChange={(e) => setFormData({...formData, tags: e.target.value})} className="w-full px-3 py-2 border rounded-lg" placeholder="例如: 技术, 产品, 设计" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">初始状态</label>
+                                <select value={formData.status} onChange={(e) => setFormData({...formData, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg">
+                                    <option value="unclassified">未分类</option>
+                                    <option value="active">进行中</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="p-6 border-t flex justify-end gap-3">
+                            <button onClick={onClose} disabled={submitting} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50">取消</button>
+                            <button onClick={handleSubmit} disabled={submitting} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{submitting ? '创建中...' : '创建'}</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 想法卡片组件
+        const IdeaCard = ({ idea, onClick }) => {
+            const pressure = calculatePressure(idea);
+            
+            return (
+                <div 
+                    onClick={onClick}
+                    className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 hover:shadow-md transition-all cursor-pointer group"
+                >
+                    <div className="flex items-start justify-between mb-3">
+                        <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors line-clamp-1">
+                            {idea.title}
+                        </h3>
+                        {idea.meta.updated_flag && (
+                            <span className="relative flex h-3 w-3">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                            </span>
+                        )}
+                    </div>
+                    
+                    <p className="text-gray-600 text-sm mb-4 line-clamp-2">{idea.content}</p>
+                    
+                    <div className="flex items-center justify-between">
+                        <div className="flex flex-wrap gap-1">
+                            {idea.tags.slice(0, 3).map(tag => (
+                                <span key={tag} className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">
+                                    {tag}
+                                </span>
+                            ))}
+                            {idea.tags.length > 3 && (
+                                <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">
+                                    +{idea.tags.length - 3}
+                                </span>
+                            )}
+                        </div>
+                        
+                        <div className="flex items-center gap-3 text-sm text-gray-500">
+                            <span className="flex items-center gap-1">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                </svg>
+                                {idea.comments.length}
+                            </span>
+                            <span className={`text-xs font-medium ${
+                                pressure >= 70 ? 'text-red-600' : pressure >= 40 ? 'text-yellow-600' : 'text-green-600'
+                            }`}>
+                                压强 {Math.round(pressure)}
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <div className="mt-3 flex items-center justify-between text-xs text-gray-400">
+                        <span className={`px-2 py-1 rounded border text-xs ${getStatusColor(idea.status)}`}>
+                            {getStatusLabel(idea.status)}
+                        </span>
+                        <span>{formatDate(idea.meta.last_updated)}</span>
+                    </div>
+                </div>
+            );
+        };
+
+        // 主应用组件
+        const App = () => {
+            const [ideas, setIdeas] = useState([]);
+            const [selectedIdea, setSelectedIdea] = useState(null);
+            const [filterStatus, setFilterStatus] = useState('all');
+            const [filterTag, setFilterTag] = useState('');
+            const [searchQuery, setSearchQuery] = useState('');
+            const [showAddModal, setShowAddModal] = useState(false);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [stats, setStats] = useState({ total: 0, updated: 0, active: 0, comments: 0 });
+            const [allTags, setAllTags] = useState([]);
+            const [useMockData, setUseMockData] = useState(false);
+
+            // 加载数据
+            const loadData = async () => {
+                try {
+                    setLoading(true);
+                    setError(null);
+                    
+                    // 构建查询参数
+                    const params = {};
+                    if (filterStatus !== 'all') params.status = filterStatus;
+                    if (filterTag) params.tag = filterTag;
+                    if (searchQuery) params.search = searchQuery;
+                    
+                    const [ideasRes, statsRes, tagsRes] = await Promise.all([
+                        API.getIdeas(params),
+                        API.getStats(),
+                        API.getTags()
+                    ]);
+                    
+                    setIdeas(ideasRes.ideas || []);
+                    setStats(statsRes);
+                    setAllTags(tagsRes.tags || []);
+                    setUseMockData(false);
+                } catch (err) {
+                    console.error('API 错误:', err);
+                    setError('无法连接到服务器，使用本地数据');
+                    // 使用模拟数据作为后备
+                    setIdeas(MOCK_DATA);
+                    setUseMockData(true);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // 初始加载和过滤器变化时重新加载
+            useEffect(() => {
+                loadData();
+            }, [filterStatus, filterTag]);
+
+            // 搜索防抖
+            useEffect(() => {
+                const timer = setTimeout(() => {
+                    loadData();
+                }, 300);
+                return () => clearTimeout(timer);
+            }, [searchQuery]);
+
+            // 创建想法
+            const handleCreateIdea = async (data) => {
+                try {
+                    await API.createIdea(data);
+                    setShowAddModal(false);
+                    loadData();
+                } catch (err) {
+                    alert('创建失败: ' + err.message);
+                }
+            };
+
+            // 添加评论
+            const handleAddComment = async (ideaId, content) => {
+                try {
+                    await API.addComment(ideaId, content);
+                    // 重新加载以获取最新数据
+                    const updated = await API.getIdea(ideaId);
+                    setSelectedIdea(updated);
+                    loadData();
+                } catch (err) {
+                    alert('添加评论失败: ' + err.message);
+                }
+            };
+
+            // 更新想法
+            const handleUpdateIdea = async (ideaId, updates) => {
+                try {
+                    await API.updateIdea(ideaId, updates);
+                    loadData();
+                    if (selectedIdea && selectedIdea.id === ideaId) {
+                        const updated = await API.getIdea(ideaId);
+                        setSelectedIdea(updated);
+                    }
+                } catch (err) {
+                    alert('更新失败: ' + err.message);
+                }
+            };
+
+            // 自动打标
+            const handleAutoLabel = async () => {
+                try {
+                    const result = await API.autoLabel();
+                    alert(result.message);
+                    loadData();
+                } catch (err) {
+                    alert('自动打标失败: ' + err.message);
+                }
+            };
+
+            // 评估想法
+            const handleEvaluate = async (ideaId) => {
+                try {
+                    await API.evaluate(ideaId);
+                    const updated = await API.getIdea(ideaId);
+                    setSelectedIdea(updated);
+                    loadData();
+                } catch (err) {
+                    alert('评估失败: ' + err.message);
+                }
+            };
+
+            // 过滤后的想法（如果使用API，数据已经过滤过了）
+            const filteredIdeas = useMemo(() => {
+                if (useMockData) {
+                    return ideas.filter(idea => {
+                        if (filterStatus !== 'all' && idea.status !== filterStatus) return false;
+                        if (filterTag && !idea.tags.includes(filterTag)) return false;
+                        if (searchQuery) {
+                            const query = searchQuery.toLowerCase();
+                            return idea.title.toLowerCase().includes(query) || 
+                                   idea.content.toLowerCase().includes(query);
+                        }
+                        return true;
+                    });
+                }
+                return ideas;
+            }, [ideas, filterStatus, filterTag, searchQuery, useMockData]);
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    {/* Header */}
+                    <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white text-xl font-bold">
+                                        IF
+                                    </div>
+                                    <div>
+                                        <h1 className="text-2xl font-bold text-gray-900">Ideaflow</h1>
+                                        <p className="text-sm text-gray-500">灵感管理系统</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    {!useMockData && (
+                                        <button 
+                                            onClick={handleAutoLabel}
+                                            className="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors flex items-center gap-2"
+                                        >
+                                            <span>🏷️</span>
+                                            Agent自动打标
+                                        </button>
+                                    )}
+                                    <button 
+                                        onClick={() => setShowAddModal(true)}
+                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                                    >
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                        </svg>
+                                        新建想法
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Main Content */}
+                    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                        {/* Error / Loading */}
+                        {error && (
+                            <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center justify-between">
+                                <span className="text-yellow-800">{error}</span>
+                                <button onClick={loadData} className="px-3 py-1 bg-yellow-200 hover:bg-yellow-300 rounded text-sm">
+                                    重试
+                                </button>
+                            </div>
+                        )}
+                        {loading && (
+                            <div className="mb-4 text-center py-4">
+                                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                                <p className="text-gray-500 mt-2">加载中...</p>
+                            </div>
+                        )}
+
+                        {/* Stats */}
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                            <StatCard 
+                                title="总想法数" 
+                                value={stats.total} 
+                                icon="💡" 
+                                color="bg-blue-100"
+                            />
+                            <StatCard 
+                                title="待处理" 
+                                value={stats.updated} 
+                                subtitle="需要关注"
+                                icon="🔴" 
+                                color="bg-red-100"
+                            />
+                            <StatCard 
+                                title="进行中" 
+                                value={stats.active} 
+                                icon="⚡" 
+                                color="bg-yellow-100"
+                            />
+                            <StatCard 
+                                title="总评论" 
+                                value={stats.comments} 
+                                icon="💬" 
+                                color="bg-green-100"
+                            />
+                        </div>
+
+                        {/* Pressure Heatmap */}
+                        <PressureHeatmap ideas={ideas} />
+
+                        {/* Filters */}
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
+                            <div className="flex flex-col md:flex-row gap-4">
+                                <div className="flex-1">
+                                    <input
+                                        type="text"
+                                        placeholder="搜索想法..."
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+                                <div className="flex gap-3">
+                                    <select 
+                                        value={filterStatus}
+                                        onChange={(e) => setFilterStatus(e.target.value)}
+                                        className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        <option value="all">所有状态</option>
+                                        <option value="unclassified">未分类</option>
+                                        <option value="active">进行中</option>
+                                        <option value="archived">已归档</option>
+                                        <option value="transformed">已转化</option>
+                                    </select>
+                                    <select 
+                                        value={filterTag}
+                                        onChange={(e) => setFilterTag(e.target.value)}
+                                        className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        <option value="">所有标签</option>
+                                        {allTags.map(tag => (
+                                            <option key={tag} value={tag}>{tag}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Ideas Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {filteredIdeas.map(idea => (
+                                <IdeaCard 
+                                    key={idea.id} 
+                                    idea={idea} 
+                                    onClick={() => setSelectedIdea(idea)}
+                                />
+                            ))}
+                        </div>
+
+                        {filteredIdeas.length === 0 && (
+                            <div className="text-center py-16">
+                                <div className="text-6xl mb-4">🔍</div>
+                                <h3 className="text-lg font-medium text-gray-900 mb-2">没有找到匹配的想法</h3>
+                                <p className="text-gray-500">尝试调整筛选条件或搜索关键词</p>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* Thread View Modal */}
+                    {selectedIdea && (
+                        <ThreadView 
+                            idea={selectedIdea} 
+                            onClose={() => setSelectedIdea(null)}
+                            onAddComment={handleAddComment}
+                            onEvaluate={!useMockData ? handleEvaluate : null}
+                        />
+                    )}
+
+                    {/* Add Modal */}
+                    {showAddModal && (
+                        <AddModal 
+                            onClose={() => setShowAddModal(false)}
+                            onCreate={handleCreateIdea}
+                        />
+                    )}
+                </div>
+            );
+        };
+
+        // 渲染应用
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
